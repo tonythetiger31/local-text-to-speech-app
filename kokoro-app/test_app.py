@@ -145,3 +145,16 @@ def test_index_contains_generating_progress(client):
 def test_index_contains_playing_progress(client):
     response = client.get('/')
     assert b'Playing' in response.data
+
+
+def test_index_contains_key_element_ids(client):
+    response = client.get('/')
+    assert b'id="speak-btn"' in response.data
+    assert b'id="readalong"' in response.data
+    assert b'id="progress-section"' in response.data
+    assert b'id="expand-btn"' in response.data
+
+
+def test_index_contains_glassmorphism_css(client):
+    response = client.get('/')
+    assert b'backdrop-filter' in response.data

@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest kokoro-app/test_app.py -v -k \"not test_job_chunk\")",
+      "Bash(python -m pytest kokoro-app/test_app.py -q -k \"not test_job_chunk\")"
+    ]
+  }
+}
