@@ -1,0 +1,6 @@
+services:
+  kokoro-tts:
+    build: .
+    ports:
+      - "5050:5050"
+    restart: unless-stopped
