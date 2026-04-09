@@ -8,8 +8,16 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     espeak-ng \
     && rm -rf /var/lib/apt/lists/*
 
+# Install Python deps in a separate layer so they're cached between rebuilds.
+# torch is ~800MB — this layer only re-runs when requirements.txt changes.
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install -r requirements.txt
+
+# Pre-download Kokoro model weights into the image so first run is instant.
+RUN python - <<'EOF'
+from kokoro import KPipeline
+KPipeline(lang_code='a')
+EOF
 
 COPY . .
 

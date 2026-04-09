@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kokoro TTS</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: #0f0f0f;
+      color: #e8e8e8;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 16px;
+    }
+
+    .card {
+      width: 100%;
+      max-width: 680px;
+      background: #1a1a1a;
+      border: 1px solid #2e2e2e;
+      border-radius: 12px;
+      padding: 36px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: #ffffff;
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: #888;
+      margin-bottom: 6px;
+    }
+
+    textarea, select {
+      width: 100%;
+      background: #111;
+      color: #e8e8e8;
+      border: 1px solid #333;
+      border-radius: 8px;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      resize: vertical;
+    }
+
+    textarea:focus, select:focus {
+      border-color: #6c63ff;
+    }
+
+    textarea {
+      min-height: 180px;
+      line-height: 1.55;
+    }
+
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23888' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 36px;
+      cursor: pointer;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      appearance: none;
+      height: 4px;
+      background: #333;
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: #6c63ff;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      background: #8b84ff;
+    }
+
+    #speed-label {
+      font-size: 0.9rem;
+      color: #aaa;
+      white-space: nowrap;
+      min-width: 72px;
+    }
+
+    button#speak-btn {
+      width: 100%;
+      padding: 14px;
+      background: #6c63ff;
+      color: #fff;
+      border: none;
+      border-radius: 8px;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: background 0.15s, opacity 0.15s;
+    }
+
+    button#speak-btn:hover:not(:disabled) {
+      background: #8b84ff;
+    }
+
+    button#speak-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
+    #status {
+      font-size: 0.88rem;
+      min-height: 1.2em;
+      color: #888;
+      text-align: center;
+    }
+
+    #status.error {
+      color: #ff6b6b;
+    }
+
+    #audio-player {
+      display: none;
+      width: 100%;
+    }
+
+    #audio-player audio {
+      width: 100%;
+      border-radius: 6px;
+    }
+
+    .audio-controls {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .audio-controls audio {
+      flex: 1;
+      border-radius: 6px;
+    }
+
+    button#stop-btn {
+      padding: 8px 16px;
+      background: #333;
+      color: #e8e8e8;
+      border: 1px solid #444;
+      border-radius: 8px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.15s;
+    }
+
+    button#stop-btn:hover {
+      background: #444;
+    }
+
+    #char-counter {
+      font-size: 0.8rem;
+      color: #666;
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    #char-counter.warning {
+      color: #ff6b6b;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Kokoro TTS</h1>
+
+    <div>
+      <label for="text-input">Text</label>
+      <textarea id="text-input" rows="8" placeholder="Paste your text here..."></textarea>
+      <div id="char-counter">0 / 5000 characters</div>
+    </div>
+
+    <div>
+      <label for="voice-select">Voice</label>
+      <select id="voice-select"></select>
+    </div>
+
+    <div>
+      <label>Speed</label>
+      <div class="slider-row">
+        <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+        <span id="speed-label">Speed: 1.0x</span>
+      </div>
+    </div>
+
+    <button id="speak-btn">Speak</button>
+
+    <div id="status"></div>
+
+    <div id="audio-player">
+      <div class="audio-controls">
+        <audio id="audio-el" controls></audio>
+        <button id="stop-btn">Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const textInput   = document.getElementById('text-input');
+    const voiceSelect = document.getElementById('voice-select');
+    const speedSlider = document.getElementById('speed-slider');
+    const speedLabel  = document.getElementById('speed-label');
+    const speakBtn    = document.getElementById('speak-btn');
+    const statusEl    = document.getElementById('status');
+    const audioPlayer = document.getElementById('audio-player');
+    const audioEl     = document.getElementById('audio-el');
+    const charCounter = document.getElementById('char-counter');
+    const stopBtn     = document.getElementById('stop-btn');
+
+    const MAX_CHARS = 5000;
+
+    function updateCharCounter() {
+      const len = textInput.value.length;
+      charCounter.textContent = `${len} / ${MAX_CHARS} characters`;
+      charCounter.className = len > 4500 ? 'warning' : '';
+      speakBtn.disabled = len === 0 || len > MAX_CHARS;
+    }
+
+    textInput.addEventListener('input', updateCharCounter);
+    updateCharCounter();
+
+    // Live speed display
+    speedSlider.addEventListener('input', () => {
+      speedLabel.textContent = `Speed: ${parseFloat(speedSlider.value).toFixed(1)}x`;
+    });
+
+    // Populate voices on load
+    async function loadVoices() {
+      try {
+        const res = await fetch('/voices');
+        const voices = await res.json();
+        voices.forEach(v => {
+          const opt = document.createElement('option');
+          opt.value = v;
+          opt.textContent = v;
+          if (v === 'af_bella') opt.selected = true;
+          voiceSelect.appendChild(opt);
+        });
+      } catch (err) {
+        setStatus('Failed to load voices: ' + err.message, true);
+      }
+    }
+
+    function setStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.className = isError ? 'error' : '';
+    }
+
+    async function speak() {
+      const text  = textInput.value.trim();
+      const voice = voiceSelect.value;
+      const speed = parseFloat(speedSlider.value);
+
+      if (!text) {
+        setStatus('Please enter some text first.', true);
+        return;
+      }
+
+      speakBtn.disabled = true;
+      stopBtn.disabled = true;
+      setStatus('Generating...');
+      audioPlayer.style.display = 'none';
+
+      try {
+        const res = await fetch('/speak', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text, voice, speed }),
+        });
+
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({ error: res.statusText }));
+          throw new Error(err.error || res.statusText);
+        }
+
+        const blob = await res.blob();
+        const url  = URL.createObjectURL(blob);
+
+        // Revoke previous blob URL to avoid memory leaks
+        if (audioEl.src && audioEl.src.startsWith('blob:')) {
+          URL.revokeObjectURL(audioEl.src);
+        }
+
+        audioEl.src = url;
+        audioPlayer.style.display = 'block';
+        stopBtn.disabled = false;
+        audioEl.play();
+        setStatus('');
+      } catch (err) {
+        setStatus('Error: ' + err.message, true);
+      } finally {
+        updateCharCounter();
+      }
+    }
+
+    stopBtn.addEventListener('click', () => {
+      audioEl.pause();
+      audioEl.currentTime = 0;
+    });
+
+    speakBtn.addEventListener('click', speak);
+
+    // Ctrl+Enter / Cmd+Enter in textarea triggers Speak
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        speak();
+      }
+    });
+
+    loadVoices();
+  </script>
+</body>
+</html>

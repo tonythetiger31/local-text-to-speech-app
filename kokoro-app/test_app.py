@@ -41,3 +41,41 @@ def test_speak_custom_voice_and_speed_returns_200(client):
     })
     assert response.status_code == 200
     assert response.content_type == 'audio/wav'
+
+
+def test_index_returns_200(client):
+    response = client.get('/')
+    assert response.status_code == 200
+
+
+def test_index_contains_title(client):
+    response = client.get('/')
+    assert b'Kokoro TTS' in response.data
+
+
+def test_index_contains_textarea(client):
+    response = client.get('/')
+    assert b'<textarea' in response.data
+
+
+def test_index_contains_select(client):
+    response = client.get('/')
+    assert b'<select' in response.data
+
+
+def test_speak_text_over_5000_chars_returns_400(client):
+    long_text = 'a' * 5001
+    response = client.post('/speak', json={'text': long_text})
+    assert response.status_code == 400
+
+
+def test_speak_text_over_5000_chars_returns_error_key(client):
+    long_text = 'a' * 5001
+    response = client.post('/speak', json={'text': long_text})
+    data = response.get_json()
+    assert 'error' in data
+
+
+def test_index_contains_char_counter(client):
+    response = client.get('/')
+    assert b'5000' in response.data
