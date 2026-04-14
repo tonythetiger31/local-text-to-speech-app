@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest test_app.py -v -k \"split\")"
+    ]
+  }
+}

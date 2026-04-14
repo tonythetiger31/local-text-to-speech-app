@@ -26,49 +26,95 @@ VOICES = [
 ]
 
 
-def split_into_chunks(text, max_chars=300):
-    # Split on sentence-ending punctuation
-    fragments = re.split(r'(?<=[\.\!\?])\s+|\n', text)
+def split_into_chunks(text, max_chars=400):
+    # Stage 1: normalize line breaks.
+    # Single \n not preceded by sentence-ending punctuation is a soft word-wrap
+    # (e.g. text copied from a PDF or formatted document) — replace with a space.
+    # Single \n after .!? is a real sentence break — leave it.
+    # Multiple \n (blank lines) are paragraph breaks — collapse to one \n.
+    text = re.sub(r'(?<![.!?\n])\n(?!\n)', ' ', text)
+    text = re.sub(r'\n{2,}', '\n', text)
+    text = re.sub(r'[ \t]+', ' ', text)  # collapse runs of spaces/tabs to one
 
-    # Re-join short fragments with the next one
+    # Stage 2: split on the remaining newlines (true sentence/paragraph boundaries)
+    lines = text.split('\n')
+
+    # Stage 3: split each line into sentences.
+    # Require an uppercase letter or opening quote after .!? so abbreviations
+    # like "Mr. Smith" or "U.S. Army" are not treated as sentence boundaries.
+    sent_re = re.compile(r'(?<=[.!?])\s+(?=[A-Z\"\u201C\u2018])')
+    sentences = []
+    for line in lines:
+        line = line.strip()
+        if not line:
+            continue
+        for s in sent_re.split(line):
+            s = s.strip()
+            if s:
+                sentences.append(s)
+
+    # Stage 4: sentences still over max_chars → split at ; : — (delimiter preserved)
+    expanded = []
+    for s in sentences:
+        if len(s) <= max_chars:
+            expanded.append(s)
+        else:
+            parts = re.split(r'(?<=[;:\u2014])\s+', s)
+            buf = ''
+            for p in parts:
+                p = p.strip()
+                if not p:
+                    continue
+                candidate = (buf + ' ' + p).strip() if buf else p
+                if len(candidate) <= max_chars:
+                    buf = candidate
+                else:
+                    if buf:
+                        expanded.append(buf)
+                    buf = p
+            if buf:
+                expanded.append(buf)
+
+    # Stage 5: still over max_chars → split at commas (comma preserved via lookbehind)
+    result = []
+    for chunk in expanded:
+        if len(chunk) <= max_chars:
+            result.append(chunk)
+        else:
+            parts = re.split(r'(?<=,)\s+', chunk)
+            buf = ''
+            for p in parts:
+                p = p.strip()
+                if not p:
+                    continue
+                candidate = (buf + ' ' + p).strip() if buf else p
+                if len(candidate) <= max_chars:
+                    buf = candidate
+                else:
+                    if buf:
+                        result.append(buf)
+                    buf = p
+            if buf:
+                result.append(buf)
+
+    # Stage 6: merge short fragments (< 30 chars) forward into the accumulating carry
     merged = []
     carry = ''
-    for frag in fragments:
-        frag = frag.strip()
-        if not frag:
+    for chunk in result:
+        chunk = chunk.strip()
+        if not chunk:
             continue
-        combined = (carry + ' ' + frag).strip() if carry else frag
-        if len(carry) < 30 and carry:
+        combined = (carry + ' ' + chunk).strip() if carry else chunk
+        if carry and len(carry) < 30:
             carry = combined
         else:
             if carry:
                 merged.append(carry)
-            carry = frag
+            carry = chunk
     if carry:
         merged.append(carry)
 
-    # Split any fragment that exceeds max_chars on commas/semicolons
-    result = []
-    for chunk in merged:
-        if len(chunk) <= max_chars:
-            result.append(chunk)
-        else:
-            sub_parts = re.split(r'[,;]\s*', chunk)
-            current = ''
-            for part in sub_parts:
-                if not part.strip():
-                    continue
-                candidate = (current + ', ' + part).strip(', ') if current else part
-                if len(candidate) <= max_chars:
-                    current = candidate
-                else:
-                    if current:
-                        result.append(current)
-                    current = part
-            if current:
-                result.append(current)
-
-    return [c for c in result if c.strip()]
+    return [c for c in merged if c.strip()]
 
 
 def _synthesize_job(job_id, chunk_list, voice, speed):
@@ -117,8 +163,8 @@ def speak():
     if not text:
         return jsonify({'error': 'text is required and must be non-empty'}), 400
 
-    if len(text) > 20000:
-        return jsonify({'error': 'Text too long. Maximum 20000 characters.'}), 400
+    if len(text) > 100000:
+        return jsonify({'error': 'Text too long. Maximum 100000 characters.'}), 400
 
     voice = data.get('voice', 'af_bella')
     speed = float(data.get('speed', 1.0))
