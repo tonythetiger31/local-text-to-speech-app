@@ -238,4 +238,30 @@ assert.ok(
   'FAIL: index.html does not contain "requestAnimationFrame"'
 );
 
+// ── Prompt 4 assertions ───────────────────────────────────────────────────────
+
+// 20. renderReadalong function is present
+assert.ok(
+  html.includes('renderReadalong') || html.includes('render-readalong'),
+  'FAIL: index.html does not contain "renderReadalong" or "render-readalong"'
+);
+
+// 21. active-sentence CSS class is defined/used
+assert.ok(
+  html.includes('active-sentence'),
+  'FAIL: index.html does not contain "active-sentence"'
+);
+
+// 22. active-word CSS class is defined/used
+assert.ok(
+  html.includes('active-word'),
+  'FAIL: index.html does not contain "active-word"'
+);
+
+// 23. Edit text button label is present
+assert.ok(
+  html.includes('Edit text'),
+  'FAIL: index.html does not contain the string "Edit text"'
+);
+
 console.log('All smoke tests passed.');

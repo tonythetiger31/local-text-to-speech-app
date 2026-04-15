@@ -630,6 +630,12 @@
     let generationDone = false;
     let originalTextareaHeight = 0;
 
+    // Read-along state
+    let chunkTexts = [];
+    let chunkSpanEls = [];
+    let wordSpansByChunk = [];
+    let activeChunkIndex = -1;
+
     // ── Helpers ───────────────────────────────────────────────────────────────
     function setStatus(msg, isError = false) {
       statusEl.textContent = msg;
@@ -841,7 +847,7 @@
       return Math.min(wallElapsed * playbackRate, totalScheduledDuration);
     }
 
-    // requestAnimationFrame loop: keep progress bar in sync
+    // requestAnimationFrame loop: keep progress bar + read-along highlights in sync
     function startRaf() {
       function tick() {
         if (!isPlaying && !isPaused) return;
@@ -852,6 +858,62 @@
         // Display wall-clock time (divide content-time by rate)
         playLabel.textContent =
           `Playing: ${fmt(pos / playbackRate)} / ${fmt(totalScheduledDuration / playbackRate)}`;
+
+        // ── Read-along highlighting ───────────────────────────────────────────
+        if (chunkTexts.length > 0 && chunkDurations.length > 0) {
+          const ct = Math.max(0, Math.min(
+            (audioCtx.currentTime - playbackStartTime) * playbackRate,
+            totalScheduledDuration
+          ));
+
+          let newActiveChunk = -1;
+          let posWithinChunk = 0;
+          let acc = 0;
+          for (let i = 0; i < chunkDurations.length; i++) {
+            const dur = chunkDurations[i] || 0;
+            if (ct >= acc && ct < acc + dur) {
+              newActiveChunk = i;
+              posWithinChunk = ct - acc;
+              break;
+            }
+            acc += dur;
+          }
+          // Past all decoded chunks — stay on the last known one
+          if (newActiveChunk === -1 && chunkDurations.length > 0) {
+            newActiveChunk = chunkDurations.length - 1;
+            posWithinChunk = chunkDurations[newActiveChunk] || 0;
+          }
+
+          // Update sentence highlight when the active chunk changes
+          if (newActiveChunk !== activeChunkIndex) {
+            if (activeChunkIndex >= 0) {
+              if (chunkSpanEls[activeChunkIndex])
+                chunkSpanEls[activeChunkIndex].classList.remove('active-sentence');
+              if (wordSpansByChunk[activeChunkIndex])
+                wordSpansByChunk[activeChunkIndex].forEach(ws => ws.classList.remove('active-word'));
+            }
+            activeChunkIndex = newActiveChunk;
+            if (activeChunkIndex >= 0 && chunkSpanEls[activeChunkIndex]) {
+              chunkSpanEls[activeChunkIndex].classList.add('active-sentence');
+              chunkSpanEls[activeChunkIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+          }
+
+          // Update word highlight within the active chunk
+          if (activeChunkIndex >= 0 && wordSpansByChunk[activeChunkIndex]) {
+            const words = wordSpansByChunk[activeChunkIndex];
+            if (words.length > 0) {
+              const chunkDur = chunkDurations[activeChunkIndex] || 1;
+              const wordDur = chunkDur / words.length;
+              const wordIdx = Math.min(Math.floor(posWithinChunk / wordDur), words.length - 1);
+              words.forEach((ws, wi) => {
+                if (wi === wordIdx) ws.classList.add('active-word');
+                else ws.classList.remove('active-word');
+              });
+            }
+          }
+        }
+
         rafId = requestAnimationFrame(tick);
       }
       rafId = requestAnimationFrame(tick);
@@ -974,6 +1036,10 @@
       playBarFill.style.width = '0%';
       playLabel.textContent = 'Playing: 0:00 / 0:00';
       playPauseBtn.textContent = '⏸';
+      chunkTexts = [];
+      chunkSpanEls = [];
+      wordSpansByChunk = [];
+      activeChunkIndex = -1;
     }
 
     // ── Textarea collapse / expand ────────────────────────────────────────────
@@ -996,6 +1062,108 @@
         textInput.style.overflow = '';
         textInput.style.resize = '';
       }, 320);
+    }
+
+    // ── splitIntoChunks — mirrors tts-worker.js exactly, used for pre-rendering ──
+    function splitIntoChunks(text, maxChars = 400) {
+      text = text.replace(/(?<![.!?\n])\n(?!\n)/g, ' ');
+      text = text.replace(/\n{2,}/g, '\n');
+      text = text.replace(/[ \t]+/g, ' ');
+
+      const lines = text.split('\n');
+      const sentRe = /(?<=[.!?])\s+(?=[A-Z"\u201C\u2018])/g;
+      const sentences = [];
+      for (const rawLine of lines) {
+        const line = rawLine.trim();
+        if (!line) continue;
+        for (const s of line.split(sentRe)) {
+          const trimmed = s.trim();
+          if (trimmed) sentences.push(trimmed);
+        }
+      }
+
+      const delimRe = /(?<=[;:\u2014])\s+/g;
+      const expanded = [];
+      for (const s of sentences) {
+        if (s.length <= maxChars) {
+          expanded.push(s);
+        } else {
+          const parts = s.split(delimRe);
+          let buf = '';
+          for (const rawP of parts) {
+            const p = rawP.trim();
+            if (!p) continue;
+            const candidate = buf ? (buf + ' ' + p).trim() : p;
+            if (candidate.length <= maxChars) { buf = candidate; }
+            else { if (buf) expanded.push(buf); buf = p; }
+          }
+          if (buf) expanded.push(buf);
+        }
+      }
+
+      const commaRe = /(?<=,)\s+/g;
+      const result = [];
+      for (const chunk of expanded) {
+        if (chunk.length <= maxChars) {
+          result.push(chunk);
+        } else {
+          const parts = chunk.split(commaRe);
+          let buf = '';
+          for (const rawP of parts) {
+            const p = rawP.trim();
+            if (!p) continue;
+            const candidate = buf ? (buf + ' ' + p).trim() : p;
+            if (candidate.length <= maxChars) { buf = candidate; }
+            else { if (buf) result.push(buf); buf = p; }
+          }
+          if (buf) result.push(buf);
+        }
+      }
+
+      const merged = [];
+      let carry = '';
+      for (const rawChunk of result) {
+        const chunk = rawChunk.trim();
+        if (!chunk) continue;
+        const combined = carry ? (carry + ' ' + chunk).trim() : chunk;
+        if (carry && carry.length < 30) { carry = combined; }
+        else { if (carry) merged.push(carry); carry = chunk; }
+      }
+      if (carry) merged.push(carry);
+      return merged.filter(c => c.trim());
+    }
+
+    // ── Read-along rendering ──────────────────────────────────────────────────
+    function renderReadalong(chunks) {
+      readalong.innerHTML = '';
+      chunkSpanEls = [];
+      wordSpansByChunk = [];
+
+      chunks.forEach((text) => {
+        const div = document.createElement('div');
+        div.className = 'chunk';
+
+        const words = text.split(/\s+/).filter(w => w.length > 0);
+        const wordSpans = [];
+        words.forEach((word, wi) => {
+          if (wi > 0) div.appendChild(document.createTextNode(' '));
+          const ws = document.createElement('span');
+          ws.className = 'word';
+          ws.textContent = word;
+          div.appendChild(ws);
+          wordSpans.push(ws);
+        });
+
+        readalong.appendChild(div);
+        chunkSpanEls.push(div);
+        wordSpansByChunk.push(wordSpans);
+      });
+    }
+
+    function clearHighlights() {
+      readalong.querySelectorAll('.active-sentence').forEach(el => el.classList.remove('active-sentence'));
+      readalong.querySelectorAll('.active-word').forEach(el => el.classList.remove('active-word'));
+      activeChunkIndex = -1;
     }
 
     // ── Web Worker setup ──────────────────────────────────────────────────────
@@ -1051,7 +1219,10 @@
       genBarFill.style.width = '0%';
       genLabel.textContent = 'Generating: 0 of 0 chunks';
       setStatus('Generating…');
+      chunkTexts = splitIntoChunks(text);
       collapseTextarea();
+      renderReadalong(chunkTexts);
+      readalong.style.display = 'block';
 
       const voice = voiceSelect.value;
       const speed = parseFloat(speedSlider.value);
@@ -1066,11 +1237,13 @@
       playbackControls.style.display = 'none';
       setStatus('');
       expandTextarea();
+      readalong.style.display = 'none';
     });
 
     // ── Expand / edit text ────────────────────────────────────────────────────
     expandBtn.addEventListener('click', () => {
       expandTextarea();
+      readalong.style.display = 'none';
     });
 
     // ── Play / Pause ──────────────────────────────────────────────────────────
