@@ -2,7 +2,7 @@
 
 A local text-to-speech web app powered by [Kokoro](https://github.com/hexgrad/kokoro). Paste text, pick a voice, adjust speed, and generate audio — all running on your machine with no external API calls.
 
-![Kokoro TTS screenshot](screenshot.png)
+![Kokoro TTS screenshot](docs/screenshot.png)
 
 ## Prerequisites
 
