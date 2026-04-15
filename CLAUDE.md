@@ -3,7 +3,7 @@
 ## What This Is
 
 A locally-hosted text-to-speech website powered by [Kokoro TTS](https://github.com/hexgrad/kokoro).
-Paste any text (up to 20,000 characters), pick a voice, and it reads it back to you.
+Paste any text (up to 100,000 characters), pick a voice, and it reads it back to you.
 
 The defining feature is **streaming batched synthesis**: instead of waiting for the entire text to
 be converted before audio starts, the backend processes the text in sentence-sized chunks and the
@@ -12,6 +12,7 @@ seconds rather than minutes.
 
 Other notable features:
 - **28 voice options** — American and British accents, male and female
+- **Voice preview** — play a short greeting clip for any voice before committing to it
 - **Playback speed control** — 0.5× to 2.0×, adjustable live during playback via Web Audio API
   (speed is not baked into synthesis; it's applied client-side so it can change freely)
 - **Read-along highlighting** — the current sentence is highlighted in a panel and individual
@@ -25,28 +26,38 @@ Other notable features:
 ## Project Structure
 
 ```
-kokoro-app/
 ├── app.py               # Flask backend
 ├── requirements.txt     # Python dependencies
 ├── docker-compose.yml   # Docker deployment config
+├── Dockerfile           # Container build definition
 ├── test_app.py          # Pytest integration tests
+├── static/
+│   ├── app.js           # Frontend JS (Web Audio API, playback, read-along)
+│   └── style.css        # Frontend styles
 └── templates/
-    └── index.html       # Single-page frontend (HTML + vanilla JS + CSS)
+    └── index.html       # HTML shell (loads app.js and style.css)
 ```
 
 ---
 
 ## Key Files
 
-### `kokoro-app/app.py`
+### `app.py`
 
 The Flask server. Runs on port 5050.
 
-**`split_into_chunks(text, max_chars=300)`**
-Splits input text into synthesis-ready segments. First splits on sentence-ending punctuation
-(`.`, `!`, `?`) and newlines, then merges fragments shorter than 30 characters into the next one
-to avoid trivially short chunks. Any segment still over 300 characters is further split on commas
-and semicolons. This mirrors the chunking logic duplicated in the frontend JS.
+**`voice_id_to_name(voice_id)`**
+Converts a voice ID like `af_alloy` to a human-readable name like `American Female Alloy`.
+Used by the `/preview` endpoint to generate a personalized greeting.
+
+**`split_into_chunks(text, max_chars=400)`**
+Splits input text into synthesis-ready segments in six stages:
+1. Normalize line breaks — soft wraps (single `\n` not after `.!?`) become spaces; multiple `\n` collapse to one.
+2. Split on remaining newlines (true paragraph/sentence boundaries).
+3. Split each line on sentence-ending punctuation, requiring an uppercase letter or opening quote to follow (avoids splitting on abbreviations like "Mr. Smith").
+4. Split any segment still over `max_chars` at `;`, `:`, or em-dash.
+5. Split remaining oversized segments at commas.
+6. Merge short fragments (< 30 chars) forward into the accumulating carry.
 
 **`_synthesize_job(job_id, chunk_list, voice, speed)`**
 Runs in a background `threading.Thread`. Iterates over the chunk list, calls the Kokoro
@@ -54,7 +65,7 @@ Runs in a background `threading.Thread`. Iterates over the chunk list, calls the
 `soundfile`, and appends the raw bytes to the job's chunk list in a thread-safe way using
 `jobs_lock`. Sets `done=True` when finished or `error` on exception.
 
-**Job-based API endpoints:**
+**API endpoints:**
 | Route | Method | Purpose |
 |---|---|---|
 | `POST /speak` | — | Creates a job, starts background synthesis thread, returns `job_id` + `total_chunks` |
@@ -62,14 +73,15 @@ Runs in a background `threading.Thread`. Iterates over the chunk list, calls the
 | `GET /job/<id>/chunk/<n>` | — | Returns the nth WAV chunk as `audio/wav` once ready |
 | `DELETE /job/<id>` | — | Frees job memory when the user stops or starts a new session |
 | `GET /voices` | — | Returns the static list of 28 supported voice IDs |
+| `POST /preview` | — | Synthesizes a short personalized greeting for the given voice, returns `audio/wav` |
 
 Jobs are stored in a plain Python dict (`jobs`) protected by a `threading.Lock`.
 
 ---
 
-### `kokoro-app/templates/index.html`
+### `static/app.js`
 
-A single-file frontend — no build step, no framework, vanilla JS using the **Web Audio API**.
+The frontend logic — no build step, no framework, vanilla JS using the **Web Audio API**.
 
 **Polling loop (`pollStatus`)** — runs every 800ms via `setInterval`. Fetches `/job/<id>/status`,
 then for each newly ready chunk index calls `fetchAndScheduleChunk`.
@@ -95,7 +107,7 @@ should be `active-word` based on elapsed time / chunk duration / word count.
 
 ---
 
-### `kokoro-app/requirements.txt`
+### `requirements.txt`
 
 ```
 flask, flask-cors, kokoro>=0.9.2, soundfile, numpy, pytest
@@ -103,15 +115,17 @@ flask, flask-cors, kokoro>=0.9.2, soundfile, numpy, pytest
 
 ---
 
-### `kokoro-app/docker-compose.yml`
+### `docker-compose.yml`
 
 Single-service compose file. Builds the local `Dockerfile`, maps port `5050:5050`, restarts
 unless stopped.
 
 ---
 
-### `kokoro-app/test_app.py`
+### `test_app.py`
 
-Pytest integration tests using Flask's test client. Covers: valid/invalid `/speak` payloads,
-job status polling, chunk retrieval (polls until `done=True`, then asserts `audio/wav`),
-`split_into_chunks` behavior, and basic UI assertions on the rendered index page.
+Pytest integration tests using Flask's test client. Covers: valid/invalid `/speak` payloads
+(including the 100,000-character limit), job status polling, chunk retrieval (polls until
+`done=True`, then asserts `audio/wav`), `split_into_chunks` behavior, basic UI assertions on
+the rendered index page, `voice_id_to_name` conversions, and `/preview` endpoint (valid voice,
+missing voice, unknown voice).
