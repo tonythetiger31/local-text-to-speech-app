@@ -639,8 +639,8 @@
       const len = textInput.value.length;
       charCounter.textContent = `${len} / ${MAX_CHARS} characters`;
       charCounter.className = len > WARN_CHARS ? 'warning' : '';
-      // Only enable generate btn once model is ready AND text is valid
-      if (tts) {
+      // Only enable generate btn once worker model is ready AND text is valid
+      if (workerReady) {
         generateBtn.disabled = len === 0 || len > MAX_CHARS;
       }
     }
@@ -804,14 +804,43 @@
       if (voiceSelect.value) localStorage.setItem('preferred_voice', voiceSelect.value);
     });
 
-    // ── Generate (stub for this prompt) ──────────────────────────────────────
+    // ── Web Worker setup ─────────────────────────────────────────────────────
+    const worker = new Worker('tts-worker.js');
+    let workerReady = false;
+
+    worker.onmessage = (e) => {
+      const msg = e.data;
+      if (msg.type === 'ready') {
+        workerReady = true;
+        updateCharCounter(); // re-evaluate generate button state
+      } else if (msg.type === 'chunk') {
+        console.log(`[chunk ${msg.index + 1}/${msg.total}] "${msg.chunkText}"`);
+      } else if (msg.type === 'done') {
+        console.log('[done] synthesis complete');
+      } else if (msg.type === 'error') {
+        console.error('[worker error]', msg.message);
+        setStatus('Synthesis error: ' + msg.message, true);
+      }
+    };
+
+    worker.postMessage({ type: 'init' });
+
+    // ── Generate ──────────────────────────────────────────────────────────────
     generateBtn.addEventListener('click', () => {
-      console.log('generate clicked');
+      const text = textInput.value.trim();
+      if (!text || !workerReady) return;
+
+      // Cancel any in-progress synthesis job
+      worker.postMessage({ type: 'cancel' });
+
+      const voice = voiceSelect.value;
+      const speed = parseFloat(speedSlider.value);
+      worker.postMessage({ type: 'synthesize', text, voice, speed });
     });
 
-    // ── Stop (stub) ───────────────────────────────────────────────────────────
+    // ── Stop ──────────────────────────────────────────────────────────────────
     stopBtn.addEventListener('click', () => {
-      console.log('stop clicked');
+      worker.postMessage({ type: 'cancel' });
     });
 
     // ── Expand button ─────────────────────────────────────────────────────────
