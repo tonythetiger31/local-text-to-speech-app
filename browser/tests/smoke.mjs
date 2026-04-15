@@ -212,4 +212,30 @@ assert.ok(
   'FAIL: index.html does not instantiate new Worker("tts-worker.js")'
 );
 
+// ── Prompt 3 assertions ───────────────────────────────────────────────────────
+
+// 16. Uses decodeAudioData to decode WAV ArrayBuffers from the worker
+assert.ok(
+  html.includes('decodeAudioData'),
+  'FAIL: index.html does not contain "decodeAudioData"'
+);
+
+// 17. Implements seekTo for seeking to an arbitrary position
+assert.ok(
+  html.includes('seekTo'),
+  'FAIL: index.html does not contain "seekTo"'
+);
+
+// 18. Implements currentPosition for tracking elapsed playback time
+assert.ok(
+  html.includes('currentPosition'),
+  'FAIL: index.html does not contain "currentPosition"'
+);
+
+// 19. Uses requestAnimationFrame to drive the progress bar update loop
+assert.ok(
+  html.includes('requestAnimationFrame'),
+  'FAIL: index.html does not contain "requestAnimationFrame"'
+);
+
 console.log('All smoke tests passed.');
