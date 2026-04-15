@@ -141,6 +141,32 @@ select.previewing {
     transition: opacity 0.15s;
 }
 
+.voice-label-row {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-bottom: 6px;
+}
+
+.voice-label-row label {
+    margin-bottom: 0;
+}
+
+.voice-spinner {
+    flex-shrink: 0;
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    border: 2px solid rgba(255, 200, 140, 0.18);
+    border-top-color: rgba(255, 200, 140, 0.75);
+    visibility: hidden;
+    animation: voice-spin 0.7s linear infinite;
+}
+
+@keyframes voice-spin {
+    to { transform: rotate(360deg); }
+}
+
 .slider-row {
     display: flex;
     align-items: center;

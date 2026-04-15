@@ -18,6 +18,7 @@ const seekBackBtn = document.getElementById('seek-back-btn');
 const seekFwdBtn = document.getElementById('seek-fwd-btn');
 const expandBtn = document.getElementById('expand-btn');
 const readalong = document.getElementById('readalong');
+const voiceSpinner = document.getElementById('voice-spinner');
 
 const MAX_CHARS = 100000;
 const WARN_CHARS = 80000;
@@ -81,16 +82,27 @@ speedSlider.addEventListener('change', () => {
     }
 });
 
+// --- Voice display name ---
+function voiceDisplayName(id) {
+    const prefixMap = { af: 'American Female', bf: 'British Female', am: 'American Male', bm: 'British Male' };
+    const match = id.match(/^([a-z]+)_(.+)$/);
+    if (!match) return id;
+    const label = prefixMap[match[1]] || match[1];
+    const name = match[2].charAt(0).toUpperCase() + match[2].slice(1);
+    return `${label} — ${name}`;
+}
+
 // --- Voice loading ---
 async function loadVoices() {
     try {
         const res = await fetch('/voices');
         const voices = await res.json();
+        const saved = localStorage.getItem('preferred_voice');
         voices.forEach(v => {
             const opt = document.createElement('option');
             opt.value = v;
-            opt.textContent = v;
-            if (v === 'af_bella') opt.selected = true;
+            opt.textContent = voiceDisplayName(v);
+            if (saved ? v === saved : v === 'af_bella') opt.selected = true;
             voiceSelect.appendChild(opt);
         });
     } catch (err) {
@@ -315,7 +327,7 @@ function startRaf() {
         const total = totalScheduledDuration || 1;
         const pct = Math.min((pos / total) * 100, 100);
         playBarFill.style.width = pct + '%';
-        playLabel.textContent = `Playing: ${fmt(pos)} / ${fmt(totalScheduledDuration)}`;
+        playLabel.textContent = `Playing: ${fmt(pos / playbackRate)} / ${fmt(totalScheduledDuration / playbackRate)}`;
 
         // --- Read-along highlighting ---
         if (chunkTexts.length > 0 && chunkDurations.length > 0) {
@@ -378,7 +390,7 @@ function startRaf() {
 }
 
 // --- Schedule a single decoded buffer at a given wall-clock start time ---
-function scheduleBuffer(buffer, chunkIdx, startTime) {
+function scheduleBuffer(buffer, _chunkIdx, startTime) {
     const source = audioCtx.createBufferSource();
     source.buffer = buffer;
     source.playbackRate.value = playbackRate;
@@ -695,6 +707,7 @@ textInput.addEventListener('keydown', (e) => {
 voiceSelect.addEventListener('change', async () => {
     const voice = voiceSelect.value;
     if (!voice) return;
+    localStorage.setItem('preferred_voice', voice);
 
     // Stop any preview already in flight
     if (previewSource) {
@@ -704,6 +717,7 @@ voiceSelect.addEventListener('change', async () => {
     }
 
     voiceSelect.classList.add('previewing');
+    voiceSpinner.style.visibility = 'visible';
 
     try {
         const res = await fetch('/preview', {
@@ -713,6 +727,7 @@ voiceSelect.addEventListener('change', async () => {
         });
         if (!res.ok) {
             voiceSelect.classList.remove('previewing');
+            voiceSpinner.style.visibility = 'hidden';
             return;
         }
         const arrayBuf = await res.arrayBuffer();
@@ -733,8 +748,9 @@ voiceSelect.addEventListener('change', async () => {
 
         const audioBuf = await ctx.decodeAudioData(arrayBuf);
 
-        // Remove dim now that audio is ready to start
+        // Remove dim and spinner now that audio is ready to start
         voiceSelect.classList.remove('previewing');
+        voiceSpinner.style.visibility = 'hidden';
 
         // Stop a preview that may have started while we were awaiting
         if (previewSource) {
@@ -750,6 +766,7 @@ voiceSelect.addEventListener('change', async () => {
         src.onended = () => { if (previewSource === src) previewSource = null; };
     } catch (err) {
         voiceSelect.classList.remove('previewing');
+        voiceSpinner.style.visibility = 'hidden';
         console.warn('Preview error:', err);
     }
 });
