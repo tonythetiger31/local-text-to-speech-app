@@ -1,0 +1,835 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Kokoro TTS</title>
+  <style>
+    *,
+    *::before,
+    *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background: linear-gradient(160deg, #0a0704 0%, #100c05 40%, #160e06 70%, #110b04 100%);
+      color: rgba(255, 235, 210, 0.85);
+      font-family: "SF Pro Display", system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      min-height: 100vh;
+      display: flex;
+      align-items: flex-start;
+      justify-content: center;
+      padding: 48px 16px;
+      position: relative;
+      overflow-x: hidden;
+    }
+
+    /* Background colour blobs */
+    .bg-blob {
+      position: fixed;
+      border-radius: 50%;
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .bg-blob-1 {
+      width: 700px;
+      height: 700px;
+      background: radial-gradient(circle at center, rgba(160, 80, 20, 0.22) 0%, transparent 70%);
+      top: -220px;
+      left: -200px;
+      filter: blur(90px);
+    }
+
+    .bg-blob-2 {
+      width: 560px;
+      height: 560px;
+      background: radial-gradient(circle at center, rgba(120, 50, 15, 0.18) 0%, transparent 70%);
+      bottom: -160px;
+      right: -140px;
+      filter: blur(100px);
+    }
+
+    .bg-blob-3 {
+      width: 440px;
+      height: 440px;
+      background: radial-gradient(circle at center, rgba(180, 100, 30, 0.14) 0%, transparent 70%);
+      top: 45%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      filter: blur(110px);
+    }
+
+    .card {
+      width: 100%;
+      max-width: 680px;
+      background: rgba(255, 200, 140, 0.06);
+      backdrop-filter: blur(24px) saturate(140%);
+      -webkit-backdrop-filter: blur(24px) saturate(140%);
+      border: 1px solid rgba(255, 200, 140, 0.14);
+      border-radius: 18px;
+      padding: 36px 40px;
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45), inset 0 1px 0 rgba(255, 210, 160, 0.12);
+      position: relative;
+      z-index: 1;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      color: rgba(255, 240, 220, 0.92);
+    }
+
+    label {
+      display: block;
+      font-size: 0.8rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: rgba(255, 210, 160, 0.48);
+      margin-bottom: 6px;
+    }
+
+    textarea,
+    select {
+      width: 100%;
+      background: rgba(0, 0, 0, 0.30);
+      backdrop-filter: blur(20px) saturate(120%);
+      -webkit-backdrop-filter: blur(20px) saturate(120%);
+      color: rgba(255, 235, 210, 0.85);
+      border: 1px solid rgba(255, 200, 140, 0.14);
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 0.95rem;
+      font-family: inherit;
+      outline: none;
+      transition: border-color 0.15s;
+      resize: vertical;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.30), inset 0 1px 0 rgba(255, 200, 140, 0.06);
+    }
+
+    textarea::placeholder {
+      color: rgba(255, 210, 160, 0.25);
+    }
+
+    textarea:focus,
+    select:focus {
+      border-color: rgba(255, 200, 140, 0.32);
+    }
+
+    textarea {
+      min-height: 180px;
+      line-height: 1.55;
+      transition: height 0.3s ease, border-color 0.15s;
+    }
+
+    select {
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='%23ffffffaa' d='M6 8L1 3h10z'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 14px center;
+      padding-right: 36px;
+      cursor: pointer;
+    }
+
+    select option {
+      background: #130a04;
+      color: rgba(255, 235, 210, 0.88);
+    }
+
+    select.previewing {
+      opacity: 0.5;
+      transition: opacity 0.15s;
+    }
+
+    .voice-label-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 6px;
+    }
+
+    .voice-label-row label {
+      margin-bottom: 0;
+    }
+
+    .voice-spinner {
+      flex-shrink: 0;
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 200, 140, 0.18);
+      border-top-color: rgba(255, 200, 140, 0.75);
+      visibility: hidden;
+      animation: voice-spin 0.7s linear infinite;
+    }
+
+    @keyframes voice-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    /* Voice select row: dropdown + preview button side by side */
+    .voice-select-row {
+      display: flex;
+      gap: 8px;
+      align-items: stretch;
+    }
+
+    .voice-select-row select {
+      flex: 1;
+      width: auto;
+    }
+
+    #preview-btn {
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-size: 0.88rem;
+      font-weight: 600;
+      white-space: nowrap;
+      flex-shrink: 0;
+    }
+
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+
+    input[type="range"] {
+      flex: 1;
+      appearance: none;
+      height: 4px;
+      background: rgba(255, 200, 140, 0.18);
+      border-radius: 2px;
+      outline: none;
+      cursor: pointer;
+    }
+
+    input[type="range"]::-webkit-slider-thumb {
+      appearance: none;
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      background: rgba(255, 220, 170, 0.85);
+      cursor: pointer;
+      transition: transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.45);
+    }
+
+    input[type="range"]::-webkit-slider-thumb:hover {
+      transform: scale(1.15);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    }
+
+    #speed-label {
+      font-size: 0.9rem;
+      color: rgba(255, 210, 160, 0.48);
+      white-space: nowrap;
+      min-width: 72px;
+    }
+
+    .button-row {
+      display: flex;
+      gap: 10px;
+    }
+
+    button {
+      background: rgba(255, 200, 140, 0.08);
+      backdrop-filter: blur(20px) saturate(130%);
+      -webkit-backdrop-filter: blur(20px) saturate(130%);
+      color: rgba(255, 235, 210, 0.82);
+      border: 1px solid rgba(255, 200, 140, 0.15);
+      border-radius: 10px;
+      font-family: inherit;
+      cursor: pointer;
+      transition: background 0.15s, transform 0.15s, box-shadow 0.15s;
+      box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 210, 160, 0.1);
+    }
+
+    button:hover:not(:disabled) {
+      background: rgba(255, 200, 140, 0.14);
+      transform: scale(1.03);
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.4), inset 0 1px 0 rgba(255, 210, 160, 0.16);
+    }
+
+    button#generate-btn {
+      flex: 1;
+      padding: 14px;
+      background: rgba(160, 90, 30, 0.38);
+      border: 1px solid rgba(200, 130, 60, 0.32);
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+    }
+
+    button#generate-btn:hover:not(:disabled) {
+      background: rgba(160, 90, 30, 0.52);
+    }
+
+    button#generate-btn:disabled {
+      opacity: 0.35;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    button#stop-btn {
+      padding: 14px 20px;
+      border-radius: 10px;
+      font-size: 1rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    #status {
+      font-size: 0.88rem;
+      min-height: 1.2em;
+      color: rgba(255, 210, 160, 0.45);
+      text-align: center;
+    }
+
+    #status.error {
+      color: #e07070;
+    }
+
+    #char-counter {
+      font-size: 0.8rem;
+      color: rgba(255, 200, 140, 0.32);
+      text-align: right;
+      margin-top: 4px;
+    }
+
+    #char-counter.warning {
+      color: #e07070;
+    }
+
+    /* Progress bars */
+    #progress-section {
+      display: none;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .progress-block {
+      display: flex;
+      flex-direction: column;
+      gap: 5px;
+    }
+
+    .progress-label {
+      font-size: 0.78rem;
+      color: rgba(255, 210, 160, 0.45);
+      font-weight: 500;
+      letter-spacing: 0.03em;
+    }
+
+    .progress-track {
+      width: 100%;
+      height: 5px;
+      background: rgba(255, 200, 140, 0.12);
+      border-radius: 3px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    #gen-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(160, 90, 30, 0.7), rgba(200, 130, 60, 0.75));
+      border-radius: 3px;
+      transition: width 0.3s ease;
+    }
+
+    #play-bar-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, rgba(255, 200, 140, 0.5), rgba(255, 220, 170, 0.75));
+      border-radius: 3px;
+    }
+
+    #play-track {
+      cursor: pointer;
+    }
+
+    #play-track:hover {
+      opacity: 0.85;
+    }
+
+    /* Playback controls */
+    #playback-controls {
+      display: none;
+      justify-content: center;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .ctrl-btn {
+      padding: 8px 16px;
+      border-radius: 10px;
+      font-size: 0.9rem;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    #play-pause-btn {
+      padding: 10px 24px;
+      font-size: 1.1rem;
+    }
+
+    /* Expand / Edit text button */
+    #expand-btn {
+      display: none;
+      margin-top: 6px;
+      padding: 6px 12px;
+      border-radius: 8px;
+      font-size: 0.82rem;
+      font-family: inherit;
+      cursor: pointer;
+    }
+
+    /* Read-along panel */
+    #readalong {
+      display: none;
+      margin-top: 24px;
+      max-height: 40vh;
+      overflow-y: auto;
+      background: rgba(0, 0, 0, 0.28);
+      backdrop-filter: blur(20px) saturate(120%);
+      -webkit-backdrop-filter: blur(20px) saturate(120%);
+      border: 1px solid rgba(255, 200, 140, 0.14);
+      border-radius: 18px;
+      padding: 16px 18px;
+      line-height: 1.9;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255, 200, 140, 0.08);
+      scrollbar-color: rgba(255, 200, 140, 0.25) transparent;
+      scrollbar-width: thin;
+    }
+
+    #readalong::-webkit-scrollbar { width: 5px; }
+    #readalong::-webkit-scrollbar-track { background: transparent; }
+    #readalong::-webkit-scrollbar-thumb {
+      background: rgba(255, 200, 140, 0.25);
+      border-radius: 3px;
+    }
+
+    .chunk {
+      color: rgba(255, 220, 180, 0.38);
+      transition: color 0.15s, background 0.15s;
+      line-height: 1.9;
+      font-size: 1.05rem;
+    }
+
+    .chunk.active-sentence {
+      color: rgba(255, 235, 210, 0.88);
+      background: rgba(255, 200, 140, 0.12);
+      border-radius: 4px;
+      padding: 2px 6px 2px 8px;
+      box-shadow: -3px 0 0 rgba(255, 200, 140, 0.55);
+    }
+
+    .word {
+      border-radius: 4px;
+      padding: 0 2px;
+      transition: background-color 0.1s;
+    }
+
+    .word.active-word {
+      background: rgba(255, 200, 140, 0.25);
+      color: rgba(255, 240, 220, 0.95);
+    }
+
+    /* Loading banner */
+    #loading-banner {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(16, 10, 4, 0.96);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid rgba(255, 200, 140, 0.18);
+      color: rgba(255, 220, 170, 0.85);
+      padding: 13px 20px;
+      text-align: center;
+      font-size: 0.9rem;
+      font-weight: 500;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      transition: opacity 0.3s ease;
+    }
+
+    #loading-banner.hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .loading-spin {
+      width: 16px;
+      height: 16px;
+      border-radius: 50%;
+      border: 2px solid rgba(255, 200, 140, 0.2);
+      border-top-color: rgba(255, 200, 140, 0.8);
+      animation: load-spin 0.7s linear infinite;
+      flex-shrink: 0;
+    }
+
+    @keyframes load-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @media (max-width: 520px) {
+      .card {
+        padding: 24px 20px;
+        border-radius: 14px;
+      }
+      .bg-blob-1 { width: 350px; height: 350px; }
+      .bg-blob-2 { width: 300px; height: 300px; }
+      .bg-blob-3 { width: 260px; height: 260px; }
+    }
+  </style>
+</head>
+
+<body>
+  <div id="loading-banner">
+    <span class="loading-spin"></span>
+    Loading voice model…
+  </div>
+
+  <div class="bg-blob bg-blob-1"></div>
+  <div class="bg-blob bg-blob-2"></div>
+  <div class="bg-blob bg-blob-3"></div>
+
+  <div class="card">
+    <h1>Kokoro TTS</h1>
+
+    <div>
+      <label for="text-input">Text</label>
+      <div id="textarea-wrapper">
+        <textarea id="text-input" rows="8" placeholder="Paste your text here..."></textarea>
+        <button id="expand-btn">✎ Edit text</button>
+      </div>
+      <div id="readalong"></div>
+      <div id="char-counter">0 / 100000 characters</div>
+    </div>
+
+    <div>
+      <div class="voice-label-row">
+        <label for="voice-select">Voice</label>
+        <span id="voice-spinner" class="voice-spinner"></span>
+      </div>
+      <div class="voice-select-row">
+        <select id="voice-select"></select>
+        <button id="preview-btn" disabled>Preview</button>
+      </div>
+    </div>
+
+    <div>
+      <label>Speed</label>
+      <div class="slider-row">
+        <input type="range" id="speed-slider" min="0.5" max="2.0" step="0.1" value="1.0" />
+        <span id="speed-label">Speed: 1.0x</span>
+      </div>
+    </div>
+
+    <div class="button-row">
+      <button id="generate-btn" disabled>Generate</button>
+      <button id="stop-btn">Stop</button>
+    </div>
+
+    <div id="status"></div>
+
+    <div id="progress-section">
+      <div class="progress-block">
+        <div class="progress-label" id="gen-label">Generating: 0 of 0 chunks</div>
+        <div class="progress-track">
+          <div id="gen-bar-fill"></div>
+        </div>
+      </div>
+      <div class="progress-block">
+        <div class="progress-label" id="play-label">Playing: 0:00 / 0:00</div>
+        <div class="progress-track" id="play-track">
+          <div id="play-bar-fill"></div>
+        </div>
+      </div>
+    </div>
+
+    <div id="playback-controls">
+      <button class="ctrl-btn" id="seek-back-btn">⏮ −10s</button>
+      <button class="ctrl-btn" id="play-pause-btn">⏸</button>
+      <button class="ctrl-btn" id="seek-fwd-btn">+10s ⏭</button>
+    </div>
+  </div>
+
+  <script type="module">
+    import { KokoroTTS } from "https://cdn.jsdelivr.net/npm/kokoro-js@1/dist/kokoro.web.js";
+
+    // ── DOM refs ──────────────────────────────────────────────────────────────
+    const loadingBanner  = document.getElementById('loading-banner');
+    const textInput      = document.getElementById('text-input');
+    const voiceSelect    = document.getElementById('voice-select');
+    const voiceSpinner   = document.getElementById('voice-spinner');
+    const previewBtn     = document.getElementById('preview-btn');
+    const speedSlider    = document.getElementById('speed-slider');
+    const speedLabel     = document.getElementById('speed-label');
+    const generateBtn    = document.getElementById('generate-btn');
+    const stopBtn        = document.getElementById('stop-btn');
+    const statusEl       = document.getElementById('status');
+    const charCounter    = document.getElementById('char-counter');
+    const progressSection = document.getElementById('progress-section');
+    const genLabel       = document.getElementById('gen-label');
+    const genBarFill     = document.getElementById('gen-bar-fill');
+    const playLabel      = document.getElementById('play-label');
+    const playBarFill    = document.getElementById('play-bar-fill');
+    const playTrack      = document.getElementById('play-track');
+    const playbackControls = document.getElementById('playback-controls');
+    const playPauseBtn   = document.getElementById('play-pause-btn');
+    const seekBackBtn    = document.getElementById('seek-back-btn');
+    const seekFwdBtn     = document.getElementById('seek-fwd-btn');
+    const expandBtn      = document.getElementById('expand-btn');
+    const readalong      = document.getElementById('readalong');
+
+    // ── Constants ─────────────────────────────────────────────────────────────
+    const MAX_CHARS  = 100000;
+    const WARN_CHARS = 80000;
+
+    const FALLBACK_VOICES = [
+      'af_alloy', 'af_nova', 'af_sky',
+      'am_adam', 'am_michael',
+      'bf_emma', 'bf_isabella',
+      'bm_george', 'bm_lewis',
+    ];
+
+    // ── Model state ───────────────────────────────────────────────────────────
+    let tts = null;
+
+    // ── Preview state ─────────────────────────────────────────────────────────
+    let previewAudio = null;
+
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    function setStatus(msg, isError = false) {
+      statusEl.textContent = msg;
+      statusEl.className = isError ? 'error' : '';
+    }
+
+    function voiceDisplayName(id) {
+      const prefixMap = {
+        af: 'American Female',
+        bf: 'British Female',
+        am: 'American Male',
+        bm: 'British Male',
+      };
+      const match = id.match(/^([a-z]+)_(.+)$/);
+      if (!match) return id;
+      const label = prefixMap[match[1]] || match[1];
+      const name = match[2].charAt(0).toUpperCase() + match[2].slice(1);
+      return `${label} — ${name}`;
+    }
+
+    // ── Char counter ──────────────────────────────────────────────────────────
+    function updateCharCounter() {
+      const len = textInput.value.length;
+      charCounter.textContent = `${len} / ${MAX_CHARS} characters`;
+      charCounter.className = len > WARN_CHARS ? 'warning' : '';
+      // Only enable generate btn once model is ready AND text is valid
+      if (tts) {
+        generateBtn.disabled = len === 0 || len > MAX_CHARS;
+      }
+    }
+
+    textInput.addEventListener('input', updateCharCounter);
+    updateCharCounter();
+
+    // ── Speed slider ──────────────────────────────────────────────────────────
+    speedSlider.addEventListener('input', () => {
+      speedLabel.textContent = `Speed: ${parseFloat(speedSlider.value).toFixed(1)}x`;
+    });
+
+    // ── WAV encoder (Float32Array → ArrayBuffer) ──────────────────────────────
+    function encodeWAV(samples, sampleRate) {
+      const numSamples = samples.length;
+      const buf = new ArrayBuffer(44 + numSamples * 2);
+      const view = new DataView(buf);
+
+      function writeStr(offset, str) {
+        for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+      }
+
+      writeStr(0, 'RIFF');
+      view.setUint32(4, 36 + numSamples * 2, true);
+      writeStr(8, 'WAVE');
+      writeStr(12, 'fmt ');
+      view.setUint32(16, 16, true);           // chunk size
+      view.setUint16(20, 1, true);            // PCM
+      view.setUint16(22, 1, true);            // mono
+      view.setUint32(24, sampleRate, true);
+      view.setUint32(28, sampleRate * 2, true); // byte rate
+      view.setUint16(32, 2, true);            // block align
+      view.setUint16(34, 16, true);           // bits per sample
+      writeStr(36, 'data');
+      view.setUint32(40, numSamples * 2, true);
+
+      let offset = 44;
+      for (let i = 0; i < numSamples; i++) {
+        const s = Math.max(-1, Math.min(1, samples[i]));
+        view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+        offset += 2;
+      }
+      return buf;
+    }
+
+    // Convert kokoro-js audio output to a Blob suitable for Audio element
+    async function audioOutputToBlob(output) {
+      // Prefer native toBlob() if available
+      if (typeof output.toBlob === 'function') return output.toBlob();
+      // .toWav() returns Uint8Array / ArrayBuffer
+      if (typeof output.toWav === 'function') {
+        const wav = output.toWav();
+        return new Blob([wav], { type: 'audio/wav' });
+      }
+      // Fallback: encode Float32 audio array manually
+      const samples = output.audio ?? output.data ?? output;
+      const rate = output.sampling_rate ?? output.sampleRate ?? 24000;
+      const wav = encodeWAV(samples, rate);
+      return new Blob([wav], { type: 'audio/wav' });
+    }
+
+    // ── Populate voice dropdown ───────────────────────────────────────────────
+    function populateVoices(voices) {
+      const saved = localStorage.getItem('preferred_voice');
+      voiceSelect.innerHTML = '';
+      voices.forEach(v => {
+        const opt = document.createElement('option');
+        opt.value = v;
+        opt.textContent = voiceDisplayName(v);
+        if (saved ? v === saved : v === 'af_alloy') opt.selected = true;
+        voiceSelect.appendChild(opt);
+      });
+    }
+
+    // ── Model initialisation ──────────────────────────────────────────────────
+    async function initModel() {
+      try {
+        tts = await KokoroTTS.from_pretrained(
+          "onnx-community/Kokoro-82M-v1.0",
+          { dtype: "q8", device: "wasm" }
+        );
+
+        // Resolve voice list from library if possible, otherwise use fallback
+        let voices = FALLBACK_VOICES;
+        try {
+          if (typeof tts.list_voices === 'function') {
+            const listed = tts.list_voices();
+            if (Array.isArray(listed) && listed.length > 0) voices = listed;
+          } else if (tts.voices) {
+            const v = typeof tts.voices === 'object' && !Array.isArray(tts.voices)
+              ? Object.keys(tts.voices)
+              : tts.voices;
+            if (Array.isArray(v) && v.length > 0) voices = v;
+          }
+        } catch (_) { /* fall through to fallback */ }
+
+        populateVoices(voices);
+
+        // Hide banner and enable controls
+        loadingBanner.classList.add('hidden');
+        setTimeout(() => { loadingBanner.style.display = 'none'; }, 350);
+        previewBtn.disabled = false;
+        updateCharCounter(); // re-evaluates generateBtn disabled state
+
+      } catch (err) {
+        loadingBanner.innerHTML = `<span style="color:#e07070">Failed to load model: ${err.message}</span>`;
+        console.error('Model load error:', err);
+      }
+    }
+
+    // ── Preview ───────────────────────────────────────────────────────────────
+    async function runPreview() {
+      if (!tts) return;
+      const voice = voiceSelect.value;
+      if (!voice) return;
+
+      // Stop any in-flight preview
+      if (previewAudio) {
+        previewAudio.pause();
+        if (previewAudio._blobUrl) URL.revokeObjectURL(previewAudio._blobUrl);
+        previewAudio = null;
+      }
+
+      previewBtn.disabled = true;
+      voiceSelect.classList.add('previewing');
+      voiceSpinner.style.visibility = 'visible';
+
+      try {
+        const name = voiceDisplayName(voice);
+        // Strip the "American Female — " prefix to get just the given name
+        const shortName = name.includes('—') ? name.split('—')[1].trim() : name;
+        const greeting = `Hi, I'm ${shortName}. How can I help you today?`;
+
+        const output = await tts.generate(greeting, { voice });
+        const blob = await audioOutputToBlob(output);
+        const url = URL.createObjectURL(blob);
+
+        const audio = new Audio(url);
+        audio._blobUrl = url;
+        previewAudio = audio;
+
+        audio.play();
+        audio.onended = () => {
+          URL.revokeObjectURL(url);
+          if (previewAudio === audio) previewAudio = null;
+        };
+      } catch (err) {
+        console.warn('Preview error:', err);
+        setStatus('Preview failed: ' + err.message, true);
+      } finally {
+        voiceSelect.classList.remove('previewing');
+        voiceSpinner.style.visibility = 'hidden';
+        previewBtn.disabled = false;
+      }
+    }
+
+    previewBtn.addEventListener('click', runPreview);
+
+    // Save preferred voice on change
+    voiceSelect.addEventListener('change', () => {
+      if (voiceSelect.value) localStorage.setItem('preferred_voice', voiceSelect.value);
+    });
+
+    // ── Generate (stub for this prompt) ──────────────────────────────────────
+    generateBtn.addEventListener('click', () => {
+      console.log('generate clicked');
+    });
+
+    // ── Stop (stub) ───────────────────────────────────────────────────────────
+    stopBtn.addEventListener('click', () => {
+      console.log('stop clicked');
+    });
+
+    // ── Expand button ─────────────────────────────────────────────────────────
+    expandBtn.addEventListener('click', () => {
+      // stub — will be wired in Prompt 3
+    });
+
+    // ── Cmd/Ctrl+Enter shortcut ───────────────────────────────────────────────
+    textInput.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) {
+        e.preventDefault();
+        if (!generateBtn.disabled) generateBtn.click();
+      }
+    });
+
+    // ── Kick off model load ───────────────────────────────────────────────────
+    initModel();
+  </script>
+</body>
+
+</html>
