@@ -1,6 +1,6 @@
 import time
 import pytest
-from app import app, split_into_chunks
+from app import app, split_into_chunks, voice_id_to_name
 
 
 @pytest.fixture
@@ -30,18 +30,18 @@ def test_speak_empty_text_returns_400(client):
     assert response.status_code == 400
 
 
-def test_speak_text_over_20000_chars_returns_400(client):
-    long_text = 'a' * 20001
+def test_speak_text_over_100000_chars_returns_400(client):
+    long_text = 'a' * 100001
     response = client.post('/speak', json={'text': long_text})
     assert response.status_code == 400
 
 
-def test_speak_text_over_20000_chars_returns_error_key(client):
-    long_text = 'a' * 20001
+def test_speak_text_over_100000_chars_returns_error_key(client):
+    long_text = 'a' * 100001
     response = client.post('/speak', json={'text': long_text})
     data = response.get_json()
     assert 'error' in data
-    assert '20000' in data['error']
+    assert '100000' in data['error']
 
 
 # --- /job/<id>/status ---
@@ -158,3 +158,31 @@ def test_index_contains_key_element_ids(client):
 def test_index_contains_glassmorphism_css(client):
     response = client.get('/')
     assert b'backdrop-filter' in response.data
+
+
+# --- voice_id_to_name ---
+
+def test_voice_id_to_name_af_alloy():
+    assert voice_id_to_name('af_alloy') == 'American Female Alloy'
+
+
+def test_voice_id_to_name_bm_george():
+    assert voice_id_to_name('bm_george') == 'British Male George'
+
+
+# --- /preview ---
+
+def test_preview_valid_voice_returns_wav(client):
+    response = client.post('/preview', json={'voice': 'af_bella'})
+    assert response.status_code == 200
+    assert response.content_type == 'audio/wav'
+
+
+def test_preview_missing_voice_returns_400(client):
+    response = client.post('/preview', json={})
+    assert response.status_code == 400
+
+
+def test_preview_unknown_voice_returns_400(client):
+    response = client.post('/preview', json={'voice': 'xx_unknown'})
+    assert response.status_code == 400

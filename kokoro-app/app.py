@@ -25,6 +25,23 @@ VOICES = [
     "bm_daniel", "bm_fable", "bm_george", "bm_lewis"
 ]
 
+_PREFIX_MAP = {
+    'af': 'American Female',
+    'am': 'American Male',
+    'bf': 'British Female',
+    'bm': 'British Male',
+}
+
+
+def voice_id_to_name(voice_id):
+    """Convert a voice ID like 'af_alloy' to a human name like 'American Female Alloy'."""
+    parts = voice_id.split('_', 1)
+    if len(parts) != 2:
+        return voice_id.capitalize()
+    prefix, name = parts
+    human_prefix = _PREFIX_MAP.get(prefix, prefix.upper())
+    return f"{human_prefix} {name.capitalize()}"
+
 
 def split_into_chunks(text, max_chars=400):
     # Stage 1: normalize line breaks.
@@ -217,6 +234,31 @@ def delete_job(job_id):
     with jobs_lock:
         jobs.pop(job_id, None)
     return '', 204
+
+
+@app.route('/preview', methods=['POST'])
+def preview():
+    data = request.get_json(silent=True) or {}
+    voice = data.get('voice')
+    if not voice:
+        return jsonify({'error': 'voice is required'}), 400
+    if voice not in VOICES:
+        return jsonify({'error': f'Unknown voice: {voice}'}), 400
+
+    human_name = voice_id_to_name(voice)
+    text = f"Hey! I'm {human_name}, nice to meet you!"
+
+    audio_parts = []
+    for _, _, audio in pipeline(text, voice=voice, speed=1.0):
+        if audio is not None:
+            audio_parts.append(audio)
+
+    audio_data = np.concatenate(audio_parts) if audio_parts else np.array([], dtype=np.float32)
+
+    buffer = io.BytesIO()
+    sf.write(buffer, audio_data, 24000, format='WAV')
+    buffer.seek(0)
+    return send_file(buffer, mimetype='audio/wav')
 
 
 if __name__ == '__main__':
