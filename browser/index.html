@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Kokoro TTS</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🔊</text></svg>" />
   <style>
     *,
     *::before,
@@ -500,8 +501,8 @@
 
 <body>
   <div id="loading-banner">
-    <span class="loading-spin"></span>
-    Loading voice model…
+    <span class="loading-spin" id="loading-spin"></span>
+    <span id="loading-text">Loading voice model…</span>
   </div>
 
   <div class="bg-blob bg-blob-1"></div>
@@ -597,6 +598,20 @@
     const expandBtn       = document.getElementById('expand-btn');
     const readalong       = document.getElementById('readalong');
 
+    // ── Browser compatibility check ───────────────────────────────────────────
+    if (!window.AudioContext && !window.webkitAudioContext || !window.WebAssembly) {
+      const missing = [];
+      if (!window.AudioContext && !window.webkitAudioContext) missing.push('Web Audio API');
+      if (!window.WebAssembly) missing.push('WebAssembly');
+      document.body.insertAdjacentHTML('afterbegin',
+        `<div style="position:fixed;top:0;left:0;right:0;z-index:200;background:#3a0a0a;` +
+        `color:#e07070;padding:14px 20px;text-align:center;font-size:0.9rem;` +
+        `border-bottom:1px solid rgba(180,60,60,0.5);">` +
+        `This app requires ${missing.join(' and ')}, which your browser does not support. ` +
+        `Please use a modern browser such as Chrome, Edge, or Firefox.</div>`
+      );
+    }
+
     // ── Constants ─────────────────────────────────────────────────────────────
     const MAX_CHARS  = 100000;
     const WARN_CHARS = 80000;
@@ -629,6 +644,9 @@
     let totalChunks = 0;
     let generationDone = false;
     let originalTextareaHeight = 0;
+    // nextToSchedule: index of the next chunk to be wall-clock scheduled.
+    // Chunks must be scheduled in order; out-of-order decoded chunks queue here.
+    let nextToSchedule = 0;
 
     // Read-along state
     let chunkTexts = [];
@@ -667,11 +685,15 @@
     // ── Char counter ──────────────────────────────────────────────────────────
     function updateCharCounter() {
       const len = textInput.value.length;
-      charCounter.textContent = `${len} / ${MAX_CHARS} characters`;
-      charCounter.className = len > WARN_CHARS ? 'warning' : '';
-      if (workerReady) {
-        generateBtn.disabled = len === 0 || len > MAX_CHARS;
+      charCounter.textContent = `${len.toLocaleString()} / ${MAX_CHARS.toLocaleString()} characters`;
+      const overLimit = len > MAX_CHARS;
+      charCounter.className = overLimit || len > WARN_CHARS ? 'warning' : '';
+      if (overLimit) {
+        setStatus('Text exceeds the 100,000-character limit.', true);
+      } else if (statusEl.textContent === 'Text exceeds the 100,000-character limit.') {
+        setStatus('');
       }
+      generateBtn.disabled = len === 0 || overLimit || workersReady < 2;
     }
 
     textInput.addEventListener('input', updateCharCounter);
@@ -756,10 +778,22 @@
 
     // ── Model initialisation ──────────────────────────────────────────────────
     async function initModel() {
+      const loadingTextEl = document.getElementById('loading-text');
+      const loadingSpinEl = document.getElementById('loading-spin');
       try {
         tts = await KokoroTTS.from_pretrained(
-          "onnx-community/Kokoro-82M-v1.0",
-          { dtype: "q8", device: "wasm" }
+          "onnx-community/Kokoro-82M-v1.0-ONNX",
+          {
+            dtype: "q8",
+            device: "wasm",
+            progress_callback: (info) => {
+              if (info && info.status === 'progress' && typeof info.progress === 'number') {
+                const pct = Math.round(info.progress);
+                loadingSpinEl.style.display = 'none';
+                loadingTextEl.textContent = `Loading voice model… ${pct}%`;
+              }
+            }
+          }
         );
 
         let voices = FALLBACK_VOICES;
@@ -929,31 +963,37 @@
       scheduledBuffers.push({ source, startTime, duration: buffer.duration });
     }
 
-    // Accept a WAV ArrayBuffer from the worker, decode it via Web Audio API,
-    // cache the result, and schedule it at the correct wall-clock start time.
+    // Accept a WAV ArrayBuffer from a worker, decode it via Web Audio API,
+    // cache the result, then flush all consecutively-available chunks starting
+    // from nextToSchedule. This handles out-of-order arrival from parallel workers:
+    // chunk N is held in decodedBuffers until chunks 0…N-1 are all present.
     async function fetchAndScheduleChunk(index, arrayBuffer) {
       const audioBuf = await audioCtx.decodeAudioData(arrayBuffer);
-
       decodedBuffers[index] = audioBuf;
       chunkDurations[index] = audioBuf.duration;
 
-      // contentOffset = sum of all prior chunk durations (content-time seconds)
-      let contentOffset = 0;
-      for (let i = 0; i < index; i++) contentOffset += chunkDurations[i] || 0;
+      // Flush consecutive decoded chunks in order
+      while (decodedBuffers[nextToSchedule] !== undefined) {
+        const buf = decodedBuffers[nextToSchedule];
 
-      totalScheduledDuration = contentOffset + audioBuf.duration;
+        // contentOffset = sum of all prior chunk durations (content-time seconds)
+        let contentOffset = 0;
+        for (let j = 0; j < nextToSchedule; j++) contentOffset += chunkDurations[j] || 0;
+        totalScheduledDuration = contentOffset + buf.duration;
 
-      if (!isPlaying && !isPaused) {
-        // First chunk: anchor the playback clock and begin playback
-        playbackStartTime = audioCtx.currentTime;
-        isPlaying = true;
-        playbackControls.style.display = 'flex';
-        startRaf();
+        if (!isPlaying && !isPaused) {
+          // First chunk ready: anchor the playback clock and start
+          playbackStartTime = audioCtx.currentTime;
+          isPlaying = true;
+          playbackControls.style.display = 'flex';
+          startRaf();
+        }
+
+        // Wall-clock start = anchor + content-offset / rate
+        const absStart = playbackStartTime + contentOffset / playbackRate;
+        scheduleBuffer(buf, absStart);
+        nextToSchedule++;
       }
-
-      // Wall-clock start = anchor + content-offset / rate
-      const absStart = playbackStartTime + contentOffset / playbackRate;
-      scheduleBuffer(audioBuf, absStart);
     }
 
     // Stop all scheduled sources and reschedule everything from targetSec
@@ -1033,6 +1073,8 @@
       isPaused = false;
       totalChunks = 0;
       generationDone = false;
+      nextToSchedule = 0;
+      chunksReceived = 0;
       playBarFill.style.width = '0%';
       playLabel.textContent = 'Playing: 0:00 / 0:00';
       playPauseBtn.textContent = '⏸';
@@ -1166,43 +1208,55 @@
       activeChunkIndex = -1;
     }
 
-    // ── Web Worker setup ──────────────────────────────────────────────────────
-    const worker = new Worker('tts-worker.js');
-    let workerReady = false;
+    // ── Web Worker pool (2 workers, round-robin by chunk index) ──────────────
+    const workers = [new Worker('tts-worker.js'), new Worker('tts-worker.js')];
+    let workersReady = 0;    // increments to 2 once both workers have loaded the model
+    let workersDone = 0;     // increments per synthesis session; generationDone when === 2
+    let chunksReceived = 0;  // chunks received across both workers this session
 
-    worker.onmessage = (e) => {
+    // Shared message handler attached to both workers
+    function onWorkerMessage(e) {
       const msg = e.data;
       if (msg.type === 'ready') {
-        workerReady = true;
-        updateCharCounter();
+        workersReady++;
+        if (workersReady === 2) updateCharCounter();
       } else if (msg.type === 'chunk') {
         totalChunks = msg.total;
-        genLabel.textContent = `Generating: ${msg.index + 1} of ${msg.total} chunks`;
-        genBarFill.style.width = ((msg.index + 1) / msg.total * 100) + '%';
+        chunksReceived++;
+        genLabel.textContent = `Generating: ${chunksReceived} of ${msg.total} chunks`;
+        genBarFill.style.width = (chunksReceived / msg.total * 100) + '%';
         fetchAndScheduleChunk(msg.index, msg.buffer).catch(err => {
           console.warn('Audio scheduling error:', err);
         });
       } else if (msg.type === 'done') {
-        generationDone = true;
-        genLabel.textContent = `Generating: ${totalChunks} of ${totalChunks} chunks`;
-        genBarFill.style.width = '100%';
-        setStatus('');
+        workersDone++;
+        if (workersDone === 2) {
+          generationDone = true;
+          genLabel.textContent = `Generating: ${totalChunks} of ${totalChunks} chunks`;
+          genBarFill.style.width = '100%';
+          setStatus('');
+        }
       } else if (msg.type === 'error') {
         console.error('[worker error]', msg.message);
         setStatus('Synthesis error: ' + msg.message, true);
       }
-    };
+    }
 
-    worker.postMessage({ type: 'init' });
+    workers[0].onmessage = onWorkerMessage;
+    workers[1].onmessage = onWorkerMessage;
+    workers[0].postMessage({ type: 'init' });
+    workers[1].postMessage({ type: 'init' });
 
     // ── Generate ──────────────────────────────────────────────────────────────
     generateBtn.addEventListener('click', () => {
       const text = textInput.value.trim();
-      if (!text || !workerReady) return;
+      if (!text || workersReady < 2) return;
 
-      // Cancel any in-progress synthesis and tear down current audio
-      worker.postMessage({ type: 'cancel' });
+      // Cancel any in-progress synthesis on both workers and tear down current audio
+      workers.forEach(w => w.postMessage({ type: 'cancel' }));
       resetAudio();
+      workersDone = 0;
+      chunksReceived = 0;
 
       // Create or resume AudioContext — click counts as a user gesture
       if (!audioCtx) {
@@ -1213,25 +1267,31 @@
 
       playbackRate = parseFloat(speedSlider.value);
 
+      // Pre-split on main thread and build the read-along panel
+      chunkTexts = splitIntoChunks(text);
+
       // Reset UI
       progressSection.style.display = 'flex';
       playbackControls.style.display = 'none';
       genBarFill.style.width = '0%';
-      genLabel.textContent = 'Generating: 0 of 0 chunks';
+      genLabel.textContent = `Generating: 0 of ${chunkTexts.length} chunks`;
       setStatus('Generating…');
-      chunkTexts = splitIntoChunks(text);
       collapseTextarea();
       renderReadalong(chunkTexts);
       readalong.style.display = 'block';
 
       const voice = voiceSelect.value;
       const speed = parseFloat(speedSlider.value);
-      worker.postMessage({ type: 'synthesize', text, voice, speed });
+
+      // Dispatch to both workers: even-indexed chunks → worker 0, odd → worker 1
+      workers.forEach((w, idx) => {
+        w.postMessage({ type: 'synthesize', chunks: chunkTexts, workerIdx: idx, voice, speed });
+      });
     });
 
     // ── Stop ──────────────────────────────────────────────────────────────────
     stopBtn.addEventListener('click', () => {
-      worker.postMessage({ type: 'cancel' });
+      workers.forEach(w => w.postMessage({ type: 'cancel' }));
       resetAudio();
       progressSection.style.display = 'none';
       playbackControls.style.display = 'none';

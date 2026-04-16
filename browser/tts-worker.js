@@ -149,7 +149,7 @@ self.onmessage = async function (e) {
     try {
       const { KokoroTTS } = await import('https://cdn.jsdelivr.net/npm/kokoro-js@1/dist/kokoro.web.js');
       tts = await KokoroTTS.from_pretrained(
-        'onnx-community/Kokoro-82M-v1.0',
+        'onnx-community/Kokoro-82M-v1.0-ONNX',
         { dtype: 'q8', device: 'wasm' }
       );
       self.postMessage({ type: 'ready' });
@@ -159,11 +159,13 @@ self.onmessage = async function (e) {
 
   } else if (type === 'synthesize') {
     cancelled = false;
-    const { text, voice, speed } = e.data;
-    const chunks = splitIntoChunks(text);
+    // Main thread pre-splits and sends the full chunk array.
+    // Each worker only synthesizes its assigned indices (round-robin by workerIdx).
+    const { chunks, workerIdx, voice, speed } = e.data;
     const total = chunks.length;
 
-    for (let i = 0; i < chunks.length; i++) {
+    for (let i = 0; i < total; i++) {
+      if (i % 2 !== workerIdx) continue;
       if (cancelled) break;
 
       const chunkText = chunks[i];

@@ -206,10 +206,11 @@ assert.strictEqual(
 // 14. Empty input returns an empty array
 assert.deepEqual(splitIntoChunks(''), [], 'FAIL: empty input should return []');
 
-// 15. index.html wires up the worker (new Worker)
-assert.ok(
-  html.includes("new Worker('tts-worker.js')"),
-  'FAIL: index.html does not instantiate new Worker("tts-worker.js")'
+// 15. index.html wires up the worker pool — two Worker instantiations (parallel workers)
+const workerInstances = (html.match(/new Worker\('tts-worker\.js'\)/g) || []).length;
+assert.strictEqual(
+  workerInstances, 2,
+  `FAIL: expected tts-worker.js to be instantiated exactly twice (parallel pool), found ${workerInstances}`
 );
 
 // ── Prompt 3 assertions ───────────────────────────────────────────────────────
@@ -262,6 +263,59 @@ assert.ok(
 assert.ok(
   html.includes('Edit text'),
   'FAIL: index.html does not contain the string "Edit text"'
+);
+
+// ── Prompt 5 assertions ───────────────────────────────────────────────────────
+
+// 24. Character limit (100,000) is referenced in the HTML
+assert.ok(
+  html.includes('100000') || html.includes('100,000'),
+  'FAIL: index.html does not reference the 100,000-character limit'
+);
+
+// 25. tts-worker.js is referenced exactly twice (two worker instances)
+// (Verifies the parallel worker pool is set up; also validated as test 15 above.)
+assert.strictEqual(
+  workerInstances, 2,
+  `FAIL: expected two tts-worker.js instantiations for the parallel pool, found ${workerInstances}`
+);
+
+// 26. tts-worker.js contains splitIntoChunks (already checked as test 9 — re-assert for clarity)
+assert.ok(
+  workerSrc.includes('splitIntoChunks') || workerSrc.includes('split_into_chunks'),
+  'FAIL: tts-worker.js does not contain the chunk-splitting function'
+);
+
+// 27. splitIntoChunks never returns a chunk exceeding 400 characters.
+//     Use a text that would produce long chunks without splitting.
+const longText = 'A'.repeat(350) + '. ' + 'B'.repeat(350) + '. ' + 'C'.repeat(350) + '.';
+const longChunks = splitIntoChunks(longText);
+for (const c of longChunks) {
+  assert.ok(
+    c.length <= 400,
+    `FAIL: splitIntoChunks returned a chunk of ${c.length} chars (max 400): "${c.slice(0, 40)}…"`
+  );
+}
+
+// 28. splitIntoChunks handles a string with no sentence-ending punctuation without throwing.
+let noPunctResult;
+assert.doesNotThrow(
+  () => { noPunctResult = splitIntoChunks('no punctuation here just plain words running on'); },
+  'FAIL: splitIntoChunks threw on a string with no sentence-ending punctuation'
+);
+assert.ok(Array.isArray(noPunctResult), 'FAIL: splitIntoChunks must return an array');
+
+// 29. A sub-30-char fragment (as carry) merges with the following chunk.
+//     "OK." (3 chars) is shorter than 30, so stage-6 merges the following sentence into it.
+const subThirtyInput = 'OK. This following sentence is definitely longer than thirty characters.';
+const subThirtyResult = splitIntoChunks(subThirtyInput);
+assert.strictEqual(
+  subThirtyResult.length, 1,
+  `FAIL: sub-30-char leading fragment should merge into next chunk; got ${subThirtyResult.length}: ${JSON.stringify(subThirtyResult)}`
+);
+assert.ok(
+  subThirtyResult[0].startsWith('OK.'),
+  `FAIL: merged chunk should start with "OK.", got "${subThirtyResult[0]}"`
 );
 
 console.log('All smoke tests passed.');
